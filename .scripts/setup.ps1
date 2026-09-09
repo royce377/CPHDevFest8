@@ -62,6 +62,23 @@ if (-not $ProjectName) {
 
 $repoUrl = "https://github.com/$GitHubOrganisationName/$GitHubRepositoryName"
 
+$GitHubOrganisationId = $null
+$GitHubRepositoryId = $null
+
+if ($GitHubOrganisationName -and $GitHubRepositoryName) {
+  $repositoryMetadataJson = $(gh api "repos/$GitHubOrganisationName/$GitHubRepositoryName" 2>$null)
+  $repositoryMetadata = $null
+
+  if ($repositoryMetadataJson) {
+    $repositoryMetadata = $repositoryMetadataJson | ConvertFrom-Json
+  }
+
+  if ($repositoryMetadata) {
+    $GitHubOrganisationId = $repositoryMetadata.owner.id
+    $GitHubRepositoryId = $repositoryMetadata.id
+  }
+}
+
 $environments = Get-Content -Raw -Path $environmentsFile | ConvertFrom-Json
 
 $ParametersTableData = @{
@@ -137,6 +154,26 @@ function CreateWorkloadIdentity {
   } | ConvertTo-Json
   
   $credential | az ad app federated-credential create --id $applicationRegistrationDetails.id --parameters "@-" | Out-Null
+
+  if ($GitHubOrganisationId -and $GitHubRepositoryId) {
+    $credential = @{
+      name="$ProjectName$environmentName-WithIds";
+      issuer="https://token.actions.githubusercontent.com";
+      subject="repo:${GitHubOrganisationName}@${GitHubOrganisationId}/${GitHubRepositoryName}@${GitHubRepositoryId}:environment:$environmentName";
+      audiences=@("api://AzureADTokenExchange")
+    } | ConvertTo-Json
+
+    $credential | az ad app federated-credential create --id $applicationRegistrationDetails.id --parameters "@-" | Out-Null
+
+    $credential = @{
+      name="$ProjectName-WithIds";
+      issuer="https://token.actions.githubusercontent.com";
+      subject="repo:${GitHubOrganisationName}@${GitHubOrganisationId}/${GitHubRepositoryName}@${GitHubRepositoryId}:ref:refs/heads/main";
+      audiences=@("api://AzureADTokenExchange")
+    } | ConvertTo-Json
+
+    $credential | az ad app federated-credential create --id $applicationRegistrationDetails.id --parameters "@-" | Out-Null
+  }
 
   return $applicationRegistrationDetails.appId
 }
